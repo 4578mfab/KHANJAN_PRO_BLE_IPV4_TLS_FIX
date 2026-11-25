@@ -84,7 +84,7 @@ HELPER = r'''  // KHANJAN_IPV4_TLS_TRANSPORT
       if (dohSocket != null) return dohSocket;
     }
 
-    if (lastSocketError != null) throw lastSocketError;
+    if (lastSocketError != null) throw lastSocketError!;
     throw SocketException('Unable to resolve or connect to an IPv4 address for $server');
   }
 

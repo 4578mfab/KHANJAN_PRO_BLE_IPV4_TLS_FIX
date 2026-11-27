@@ -1,3 +1,4 @@
+
 import 'relay_config.dart';
 
 class AppSettings {
@@ -70,10 +71,16 @@ class AppSettings {
 
   static String _inferBrokerPreset(String broker) {
     switch (broker.trim().toLowerCase()) {
-      case 'broker.hivemq.com': return 'hivemq';
-      case 'broker.emqx.io': return 'emqx';
-      case 'test.mosquitto.org': return 'mosquitto';
-      default: return 'custom';
+      case 'broker.hivemq.com':
+        return 'hivemq';
+      case 'broker.emqx.io':
+        return 'emqx';
+      case 'test.mosquitto.org':
+        return 'mosquitto';
+      case 'khanjanhome.duckdns.org':
+        return 'khanjan';
+      default:
+        return 'custom';
     }
   }
 
@@ -82,24 +89,32 @@ class AppSettings {
             ?.map((e) => RelayConfig.fromJson(e as Map<String, dynamic>))
             .toList() ??
         AppSettings._defaultRelays();
+
     return AppSettings(
       broker: json['broker'] as String? ?? 'broker.hivemq.com',
       port: json['port'] as int? ?? 1883,
       clientId: json['clientId'] as String? ?? 'khanjan_iot_app',
       username: json['username'] as String? ?? '',
       password: json['password'] as String? ?? '',
-      temperatureTopic: json['temperatureTopic'] as String? ?? 'home/temperature',
-      espStatusTopic: json['espStatusTopic'] as String? ?? 'home/esp32/status',
+      temperatureTopic:
+          json['temperatureTopic'] as String? ?? 'home/temperature',
+      espStatusTopic:
+          json['espStatusTopic'] as String? ?? 'home/esp32/status',
       useWebSocket: json['useWebSocket'] as bool? ?? false,
       brokerPreset: json['brokerPreset'] as String? ??
-          _inferBrokerPreset(json['broker'] as String? ?? 'broker.hivemq.com'),
+          _inferBrokerPreset(
+              json['broker'] as String? ?? 'broker.hivemq.com'),
       connectionMode: json['connectionMode'] as String? ??
           ((json['useWebSocket'] as bool? ?? false) ? 'ws' : 'tcp'),
       themeIndex: json['themeIndex'] as int? ?? 0,
-      buttonColorIndex: (json['buttonColorIndex'] as int? ?? 0).clamp(0, 13),
-      backgroundColorIndex: (json['backgroundColorIndex'] as int? ?? 0).clamp(0, 13),
-      cardColorIndex: (json['cardColorIndex'] as int? ?? 0).clamp(0, 13),
-      textColorIndex: (json['textColorIndex'] as int? ?? 0).clamp(0, 13),
+      buttonColorIndex:
+          (json['buttonColorIndex'] as int? ?? 0).clamp(0, 13),
+      backgroundColorIndex:
+          (json['backgroundColorIndex'] as int? ?? 0).clamp(0, 13),
+      cardColorIndex:
+          (json['cardColorIndex'] as int? ?? 0).clamp(0, 13),
+      textColorIndex:
+          (json['textColorIndex'] as int? ?? 0).clamp(0, 13),
       relays: list,
     );
   }

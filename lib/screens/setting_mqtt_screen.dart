@@ -1,10 +1,15 @@
+
 import 'package:flutter/material.dart';
 import '../models/app_settings.dart';
 import '../theme/app_themes.dart';
 
 class SettingsMqttScreen extends StatefulWidget {
   final AppSettings initialSettings;
-  const SettingsMqttScreen({super.key, required this.initialSettings});
+
+  const SettingsMqttScreen({
+    super.key,
+    required this.initialSettings,
+  });
 
   @override
   State<SettingsMqttScreen> createState() => _SettingsMqttScreenState();
@@ -34,6 +39,11 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
       'label': 'Mosquitto',
       'host': 'test.mosquitto.org',
       'ports': {'tcp': 1883, 'tls': 8883, 'ws': 8080, 'wss': 8081}
+    },
+    'khanjan': {
+      'label': 'KHANJAN Private Broker',
+      'host': 'khanjanhome.duckdns.org',
+      'ports': {'tcp': 1883, 'tls': 8883}
     },
     'custom': {
       'label': 'Custom (بروکر دلخواه)',
@@ -65,33 +75,54 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
 
   void _selectBrokerPreset(String? value) {
     if (value == null) return;
+
     setState(() {
       _settings.brokerPreset = value;
+
       if (value != 'custom') {
         final preset = _brokerPresets[value]!;
         _brokerCtrl.text = preset['host'] as String;
+
+        if (value == 'khanjan') {
+          _settings.connectionMode = 'tcp';
+          _settings.useWebSocket = false;
+        }
+
         final ports = preset['ports'] as Map<String, int>;
-        _portCtrl.text = ports[_settings.connectionMode]!.toString();
+        final mode = ports.containsKey(_settings.connectionMode)
+            ? _settings.connectionMode
+            : 'tcp';
+
+        _settings.connectionMode = mode;
+        _portCtrl.text = ports[mode]!.toString();
       }
     });
   }
 
   void _selectConnectionMode(String? value) {
     if (value == null) return;
+
     setState(() {
       _settings.connectionMode = value;
       _settings.useWebSocket = value == 'ws' || value == 'wss';
+
       final ports =
-          _brokerPresets[_settings.brokerPreset]?['ports'] as Map<String, int>?;
-      if (ports != null) _portCtrl.text = ports[value]!.toString();
+          _brokerPresets[_settings.brokerPreset]?['ports']
+              as Map<String, int>?;
+
+      if (ports != null && ports.containsKey(value)) {
+        _portCtrl.text = ports[value]!.toString();
+      }
     });
   }
 
   void _save() {
     if (!_formKey.currentState!.validate()) return;
+
     _settings.broker = _brokerCtrl.text.trim();
     _settings.useWebSocket =
-        _settings.connectionMode == 'ws' || _settings.connectionMode == 'wss';
+        _settings.connectionMode == 'ws' ||
+        _settings.connectionMode == 'wss';
     _settings.port = int.tryParse(_portCtrl.text.trim()) ?? 1883;
     _settings.clientId = _clientIdCtrl.text.trim();
     _settings.username = _userCtrl.text.trim();
@@ -100,6 +131,7 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('تنظیمات MQTT ذخیره شد')),
     );
+
     Future.delayed(const Duration(milliseconds: 600), () {
       if (mounted) Navigator.pop(context, _settings);
     });
@@ -123,9 +155,13 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
           actions: [
             TextButton(
               onPressed: _save,
-              child: Text('ذخیره',
-                  style: TextStyle(
-                      color: theme.primary, fontWeight: FontWeight.bold)),
+              child: Text(
+                'ذخیره',
+                style: TextStyle(
+                  color: theme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         ),
@@ -143,46 +179,80 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
                 child: Column(
                   children: [
                     DropdownButtonFormField<String>(
-                      value: _brokerPresets.containsKey(_settings.brokerPreset)
+                      value: _brokerPresets.containsKey(
+                              _settings.brokerPreset)
                           ? _settings.brokerPreset
                           : 'custom',
-                      decoration:
-                          const InputDecoration(labelText: 'انتخاب بروکر'),
+                      decoration: const InputDecoration(
+                        labelText: 'انتخاب بروکر',
+                      ),
                       items: _brokerPresets.entries
-                          .map((e) => DropdownMenuItem(
+                          .map(
+                            (e) => DropdownMenuItem(
                               value: e.key,
-                              child: Text(e.value['label'] as String)))
+                              child: Text(e.value['label'] as String),
+                            ),
+                          )
                           .toList(),
                       onChanged: _selectBrokerPreset,
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: ['tcp', 'tls', 'ws', 'wss']
-                              .contains(_settings.connectionMode)
+                      value: [
+                        'tcp',
+                        'tls',
+                        'ws',
+                        'wss'
+                      ].contains(_settings.connectionMode)
                           ? _settings.connectionMode
                           : 'tcp',
-                      decoration: const InputDecoration(labelText: 'نوع اتصال'),
-                      items: const [
-                        DropdownMenuItem(value: 'tcp', child: Text('TCP')),
-                        DropdownMenuItem(
-                            value: 'tls', child: Text('TLS (TCP امن)')),
-                        DropdownMenuItem(
-                            value: 'ws', child: Text('WebSocket (WS)')),
-                        DropdownMenuItem(
-                            value: 'wss', child: Text('WebSocket امن (WSS)')),
-                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'نوع اتصال',
+                      ),
+                      items: _settings.brokerPreset == 'khanjan'
+                          ? const [
+                              DropdownMenuItem(
+                                value: 'tcp',
+                                child: Text('TCP (بدون TLS)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'tls',
+                                child: Text('TLS (TCP امن)'),
+                              ),
+                            ]
+                          : const [
+                              DropdownMenuItem(
+                                value: 'tcp',
+                                child: Text('TCP'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'tls',
+                                child: Text('TLS (TCP امن)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'ws',
+                                child: Text('WebSocket (WS)'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'wss',
+                                child: Text('WebSocket امن (WSS)'),
+                              ),
+                            ],
                       onChanged: _selectConnectionMode,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _brokerCtrl,
-                      decoration:
-                          const InputDecoration(labelText: 'آدرس Broker'),
+                      decoration: const InputDecoration(
+                        labelText: 'آدرس Broker',
+                      ),
                       validator: (v) =>
                           (v == null || v.trim().isEmpty) ? 'الزامی' : null,
                       onChanged: (_) {
                         if (_settings.brokerPreset != 'custom') {
-                          setState(() => _settings.brokerPreset = 'custom');
+                          setState(() {
+                            _settings.brokerPreset = 'custom';
+                          });
                         }
                       },
                     ),
@@ -190,7 +260,9 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
                     TextFormField(
                       controller: _portCtrl,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'پورت'),
+                      decoration: const InputDecoration(
+                        labelText: 'پورت',
+                      ),
                       validator: (v) {
                         final n = int.tryParse((v ?? '').trim());
                         return n == null || n < 1 || n > 65535
@@ -201,20 +273,24 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _clientIdCtrl,
-                      decoration: const InputDecoration(labelText: 'Client ID'),
+                      decoration: const InputDecoration(
+                        labelText: 'Client ID',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _userCtrl,
                       decoration: const InputDecoration(
-                          labelText: 'نام کاربری (اختیاری)'),
+                        labelText: 'نام کاربری (اختیاری)',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _passCtrl,
                       obscureText: true,
                       decoration: const InputDecoration(
-                          labelText: 'رمز عبور (اختیاری)'),
+                        labelText: 'رمز عبور (اختیاری)',
+                      ),
                     ),
                   ],
                 ),

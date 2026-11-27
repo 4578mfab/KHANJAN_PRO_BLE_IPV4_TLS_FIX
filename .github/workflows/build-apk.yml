@@ -1,3 +1,4 @@
+
 name: Build APK
 
 on:
@@ -41,23 +42,18 @@ jobs:
 
       - name: Configure Android BLE + Release stability
         run: |
-          # minSdk برای BLE
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle
 
-          # JitPack برای کتابخانه ESP
           if [ -f android/build.gradle ]; then
             grep -q 'jitpack.io' android/build.gradle || \
             sed -i '/mavenCentral()/a\ maven { url "https://jitpack.io" }' android/build.gradle
           fi
 
-          # غیرفعال کردن minify برای جلوگیری از خراب شدن Session
           if [ -f android/app/build.gradle ]; then
-            # اگر minifyEnabled true بود، false می‌کنیم
             sed -i 's/minifyEnabled true/minifyEnabled false/' android/app/build.gradle || true
             sed -i 's/shrinkResources true/shrinkResources false/' android/app/build.gradle || true
 
-            # اگر اصلاً نبود، اضافه می‌کنیم
             if ! grep -q 'minifyEnabled' android/app/build.gradle; then
               sed -i '/release {/a\ minifyEnabled false\n shrinkResources false' android/app/build.gradle || true
             fi
@@ -72,11 +68,11 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
-      - name: Apply secure IPv4 MQTT transport patch
-        run: python3 tool/patch_mqtt_client_tls.py
+
       - name: Check ESP Provisioning Version
         run: |
-          grep -A 8 'esp_provisioning_wifi:' pubspec.lock                  
+          grep -A 8 'esp_provisioning_wifi:' pubspec.lock
+
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons
 

@@ -1,7 +1,9 @@
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
@@ -10,8 +12,10 @@ import '../models/relay_config.dart';
 
 class MqttService {
   MqttServerClient? _client;
+
   StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>?
       _updatesSubscription;
+
   AppSettings? _settings;
 
   final _connectionController = StreamController<bool>.broadcast();
@@ -29,7 +33,7 @@ class MqttService {
   bool get isConnected =>
       _client?.connectionStatus?.state == MqttConnectionState.connected;
 
-  // تشخیص دامنه اختصاصی بروکر KHANJAN
+  // تشخیص دامنه اختصاصی KHANJAN
   bool _isKhanjanPrivateBroker(String broker) {
     var host = broker.trim().toLowerCase();
 
@@ -43,6 +47,139 @@ class MqttService {
     host = host.replaceFirst(RegExp(r'\.$'), '');
 
     return host == 'khanjanhome.duckdns.org';
+  }
+
+  // بررسی عمومی بودن IPv4
+  bool _isPublicIPv4(String value) {
+    final address = InternetAddress.tryParse(value);
+
+    if (address == null ||
+        address.type != InternetAddressType.IPv4) {
+      return false;
+    }
+
+    final p = value.split('.').map(int.parse).toList();
+
+    if (p.length != 4) return false;
+
+    final a = p[0];
+    final b = p[1];
+    final c = p[2];
+
+    // آدرس‌های خصوصی، محلی و رزروشده
+    if (a == 0 || a == 10 || a == 127) return false;
+    if (a == 169 && b == 254) return false;
+    if (a == 172 && b >= 16 && b <= 31) return false;
+    if (a == 192 && b == 168) return false;
+    if (a == 100 && b >= 64 && b <= 127) return false;
+
+    // محدوده‌های رزروشده و مستندسازی
+    if (a == 192 && b == 0 && c == 0) return false;
+    if (a == 192 && b == 0 && c == 2) return false;
+    if (a == 192 && b == 88 && c == 99) return false;
+    if (a == 198 && (b == 18 || b == 19)) return false;
+    if (a == 198 && b == 51 && c == 100) return false;
+    if (a == 203 && b == 0 && c == 113) return false;
+
+    // چندپخشی و محدوده‌های بالاتر
+    if (a >= 224) return false;
+
+    return true;
+  }
+
+  // دریافت IPv4 دامنه از یک سرویس DNS-over-HTTPS
+  Future<String?> _queryDoh({
+    required String host,
+    required String path,
+    required String domain,
+  }) async {
+    final uri = Uri.https(
+      host,
+      path,
+      {
+        'name': domain,
+        'type': 'A',
+      },
+    );
+
+    final response = await http.get(
+      uri,
+      headers: {
+        'Accept': 'application/dns-json',
+      },
+    ).timeout(const Duration(seconds: 7));
+
+    if (response.statusCode != 200) {
+      return null;
+    }
+
+    final decoded = jsonDecode(response.body);
+
+    if (decoded is! Map<String, dynamic>) {
+      return null;
+    }
+
+    final answers = decoded['Answer'];
+
+    if (answers is! List) {
+      return null;
+    }
+
+    for (final answer in answers) {
+      if (answer is! Map) continue;
+
+      if (answer['type'] != 1) continue;
+
+      final ip = answer['data']?.toString().trim();
+
+      if (ip == null) continue;
+
+      if (_isPublicIPv4(ip)) {
+        return ip;
+      }
+    }
+
+    return null;
+  }
+
+  // سه مسیر مستقل برای دریافت IP عمومی دامنه
+  Future<String> _resolveKhanjanPublicIPv4() async {
+    const domain = 'khanjanhome.duckdns.org';
+
+    const providers = [
+      {
+        'host': 'dns.google',
+        'path': '/resolve',
+      },
+      {
+        'host': 'cloudflare-dns.com',
+        'path': '/dns-query',
+      },
+      {
+        'host': 'dns.adguard-dns.com',
+        'path': '/resolve',
+      },
+    ];
+
+    for (final provider in providers) {
+      try {
+        final ip = await _queryDoh(
+          host: provider['host']!,
+          path: provider['path']!,
+          domain: domain,
+        );
+
+        if (ip != null && _isPublicIPv4(ip)) {
+          return ip;
+        }
+      } catch (_) {
+        // در صورت خطا، سرویس بعدی امتحان می‌شود.
+      }
+    }
+
+    throw SocketException(
+      'KHANJAN: No public IPv4 found through HTTPS DNS providers.',
+    );
   }
 
   // ساخت آدرس WebSocket
@@ -64,6 +201,7 @@ class MqttService {
 
   Future<void> connect(AppSettings settings) async {
     await disconnect();
+
     _settings = settings;
 
     final clientId = settings.clientId.trim().isEmpty
@@ -71,8 +209,6 @@ class MqttService {
         : settings.clientId.trim();
 
     final broker = settings.broker.trim();
-    final port = settings.port == 0 ? 1883 : settings.port;
-
     final mode = settings.connectionMode;
 
     final useWs = mode == 'ws' ||
@@ -81,37 +217,26 @@ class MqttService {
             mode != 'tcp' &&
             settings.useWebSocket);
 
+    final isKhanjanTcp =
+        !useWs &&
+        mode == 'tcp' &&
+        _isKhanjanPrivateBroker(broker);
+
+    // پورت اختصاصی بروکر KHANJAN همیشه 1883 است.
+    final port = isKhanjanTcp
+        ? 1883
+        : (settings.port == 0 ? 1883 : settings.port);
+
     var serverAddress = useWs
         ? _webSocketServerAddress(broker, mode)
         : broker;
 
-    // اصلاح اختصاصی اتصال TCP به دامنه KHANJAN:
-    // دامنه فقط با IPv4 جست‌وجو می‌شود.
-    // این قسمت روی TLS و بروکرهای عمومی تأثیری ندارد.
-    if (!useWs &&
-        mode == 'tcp' &&
-        _isKhanjanPrivateBroker(broker)) {
+    // مسیر اختصاصی KHANJAN TCP:
+    // DNS معمولی اپراتور استفاده نمی‌شود.
+    // IP عمومی از سرویس‌های HTTPS دریافت می‌شود.
+    if (isKhanjanTcp) {
       try {
-        final addresses = await InternetAddress.lookup(
-          broker,
-          type: InternetAddressType.IPv4,
-        ).timeout(const Duration(seconds: 8));
-
-        final ipv4Addresses = addresses
-            .where(
-              (address) =>
-                  address.type == InternetAddressType.IPv4,
-            )
-            .toList();
-
-        if (ipv4Addresses.isEmpty) {
-          throw SocketException(
-            'No IPv4 address found for KHANJAN broker: $broker',
-          );
-        }
-
-        // اتصال TCP با IPv4 دریافت‌شده از DNS
-        serverAddress = ipv4Addresses.first.address;
+        serverAddress = await _resolveKhanjanPublicIPv4();
       } catch (e) {
         _connectionController.add(false);
         _espStatusController.add(false);

@@ -68,7 +68,8 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
-
+      - name: Apply KHANJAN private broker TLS patch
+        run: python3 tool/patch_mqtt_client_tls.py
       - name: Check ESP Provisioning Version
         run: |
           grep -A 8 'esp_provisioning_wifi:' pubspec.lock

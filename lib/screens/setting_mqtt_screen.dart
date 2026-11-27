@@ -89,12 +89,10 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
         }
 
         final ports = preset['ports'] as Map<String, int>;
-        final mode = ports.containsKey(_settings.connectionMode)
-            ? _settings.connectionMode
-            : 'tcp';
-
-        _settings.connectionMode = mode;
-        _portCtrl.text = ports[mode]!.toString();
+        final selectedPort = ports[_settings.connectionMode];
+        if (selectedPort != null) {
+          _portCtrl.text = selectedPort.toString();
+        }
       }
     });
   }
@@ -145,6 +143,36 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
       _settings.cardColorIndex,
       _settings.textColorIndex,
     );
+
+    final connectionModes = _settings.brokerPreset == 'khanjan'
+        ? const [
+            DropdownMenuItem(
+              value: 'tcp',
+              child: Text('TCP'),
+            ),
+            DropdownMenuItem(
+              value: 'tls',
+              child: Text('TLS (TCP امن)'),
+            ),
+          ]
+        : const [
+            DropdownMenuItem(
+              value: 'tcp',
+              child: Text('TCP'),
+            ),
+            DropdownMenuItem(
+              value: 'tls',
+              child: Text('TLS (TCP امن)'),
+            ),
+            DropdownMenuItem(
+              value: 'ws',
+              child: Text('WebSocket (WS)'),
+            ),
+            DropdownMenuItem(
+              value: 'wss',
+              child: Text('WebSocket امن (WSS)'),
+            ),
+          ];
 
     return Theme(
       data: AppThemes.buildTheme(theme),
@@ -198,46 +226,14 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: [
-                        'tcp',
-                        'tls',
-                        'ws',
-                        'wss'
-                      ].contains(_settings.connectionMode)
+                      value: ['tcp', 'tls', 'ws', 'wss']
+                              .contains(_settings.connectionMode)
                           ? _settings.connectionMode
                           : 'tcp',
                       decoration: const InputDecoration(
                         labelText: 'نوع اتصال',
                       ),
-                      items: _settings.brokerPreset == 'khanjan'
-                          ? const [
-                              DropdownMenuItem(
-                                value: 'tcp',
-                                child: Text('TCP (بدون TLS)'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'tls',
-                                child: Text('TLS (TCP امن)'),
-                              ),
-                            ]
-                          : const [
-                              DropdownMenuItem(
-                                value: 'tcp',
-                                child: Text('TCP'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'tls',
-                                child: Text('TLS (TCP امن)'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'ws',
-                                child: Text('WebSocket (WS)'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'wss',
-                                child: Text('WebSocket امن (WSS)'),
-                              ),
-                            ],
+                      items: connectionModes,
                       onChanged: _selectConnectionMode,
                     ),
                     const SizedBox(height: 12),

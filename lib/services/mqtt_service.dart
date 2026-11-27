@@ -1,36 +1,64 @@
+
 import 'dart:async';
+import 'dart:io';
+
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+
 import '../models/app_settings.dart';
 import '../models/relay_config.dart';
 
 class MqttService {
   MqttServerClient? _client;
-  StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>? _updatesSubscription;
+  StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>?
+      _updatesSubscription;
   AppSettings? _settings;
 
   final _connectionController = StreamController<bool>.broadcast();
   final _temperatureController = StreamController<String>.broadcast();
-  final _relayStateController = StreamController<Map<String, bool>>.broadcast();
+  final _relayStateController =
+      StreamController<Map<String, bool>>.broadcast();
   final _espStatusController = StreamController<bool>.broadcast();
 
   Stream<bool> get connectionStream => _connectionController.stream;
   Stream<String> get temperatureStream => _temperatureController.stream;
-  Stream<Map<String, bool>> get relayStateStream => _relayStateController.stream;
+  Stream<Map<String, bool>> get relayStateStream =>
+      _relayStateController.stream;
   Stream<bool> get espStatusStream => _espStatusController.stream;
 
   bool get isConnected =>
       _client?.connectionStatus?.state == MqttConnectionState.connected;
 
+  // تشخیص دامنه اختصاصی بروکر KHANJAN
+  bool _isKhanjanPrivateBroker(String broker) {
+    var host = broker.trim().toLowerCase();
+
+    host = host.replaceFirst(
+      RegExp(r'^(?:mqtts?|wss?|https?)://'),
+      '',
+    );
+
+    host = host.split('/').first;
+    host = host.replaceFirst(RegExp(r':\d+$'), '');
+    host = host.replaceFirst(RegExp(r'\.$'), '');
+
+    return host == 'khanjanhome.duckdns.org';
+  }
+
+  // ساخت آدرس WebSocket
   String _webSocketServerAddress(String broker, String mode) {
     var host = broker.trim();
+
     host = host.replaceFirst(
       RegExp(r'^(?:mqtts?|wss?|https?)://', caseSensitive: false),
       '',
     );
+
     host = host.split('/').first;
     host = host.replaceFirst(RegExp(r':\d+$'), '');
+
     final scheme = mode == 'wss' ? 'wss' : 'ws';
+
     return '$scheme://$host/mqtt';
   }
 
@@ -46,14 +74,57 @@ class MqttService {
     final port = settings.port == 0 ? 1883 : settings.port;
 
     final mode = settings.connectionMode;
-    final useWs = mode == 'ws' || mode == 'wss' ||
-        (mode != 'tls' && mode != 'tcp' && settings.useWebSocket);
 
-    final serverAddress = useWs
+    final useWs = mode == 'ws' ||
+        mode == 'wss' ||
+        (mode != 'tls' &&
+            mode != 'tcp' &&
+            settings.useWebSocket);
+
+    var serverAddress = useWs
         ? _webSocketServerAddress(broker, mode)
         : broker;
 
-    _client = MqttServerClient.withPort(serverAddress, clientId, port);
+    // اصلاح اختصاصی اتصال TCP به دامنه KHANJAN:
+    // دامنه فقط با IPv4 جست‌وجو می‌شود.
+    // این قسمت روی TLS و بروکرهای عمومی تأثیری ندارد.
+    if (!useWs &&
+        mode == 'tcp' &&
+        _isKhanjanPrivateBroker(broker)) {
+      try {
+        final addresses = await InternetAddress.lookup(
+          broker,
+          type: InternetAddressType.IPv4,
+        ).timeout(const Duration(seconds: 8));
+
+        final ipv4Addresses = addresses
+            .where(
+              (address) =>
+                  address.type == InternetAddressType.IPv4,
+            )
+            .toList();
+
+        if (ipv4Addresses.isEmpty) {
+          throw SocketException(
+            'No IPv4 address found for KHANJAN broker: $broker',
+          );
+        }
+
+        // اتصال TCP با IPv4 دریافت‌شده از DNS
+        serverAddress = ipv4Addresses.first.address;
+      } catch (e) {
+        _connectionController.add(false);
+        _espStatusController.add(false);
+        rethrow;
+      }
+    }
+
+    _client = MqttServerClient.withPort(
+      serverAddress,
+      clientId,
+      port,
+    );
+
     _client!.logging(on: false);
     _client!.keepAlivePeriod = 60;
     _client!.autoReconnect = true;
@@ -88,6 +159,7 @@ class MqttService {
         settings.password,
       );
     }
+
     _client!.connectionMessage = connMess;
 
     try {
@@ -95,24 +167,30 @@ class MqttService {
     } catch (e) {
       _connectionController.add(false);
       _espStatusController.add(false);
+
       try {
         _client?.disconnect();
       } catch (_) {}
+
       _client = null;
       rethrow;
     }
 
-    if (_client?.connectionStatus?.state == MqttConnectionState.connected) {
+    if (_client?.connectionStatus?.state ==
+        MqttConnectionState.connected) {
       await _updatesSubscription?.cancel();
+
       _updatesSubscription = _client!.updates?.listen(
         _onMessage,
         onError: (Object error, StackTrace stack) {},
       );
+
       _connectionController.add(true);
       _subscribeAll();
     } else {
       _connectionController.add(false);
       _espStatusController.add(false);
+
       throw Exception('MQTT connection failed');
     }
   }
@@ -120,52 +198,81 @@ class MqttService {
   String _heartbeatTopicFor(String statusTopic) {
     final topic = statusTopic.trim();
     final slash = topic.lastIndexOf('/');
+
     if (slash < 0) return 'heartbeat';
+
     return '${topic.substring(0, slash)}/heartbeat';
   }
 
   void _subscribeAll() {
     if (_client == null || _settings == null) return;
+
     final s = _settings!;
 
     if (s.temperatureTopic.trim().isNotEmpty) {
-      _client!.subscribe(s.temperatureTopic.trim(), MqttQos.atLeastOnce);
+      _client!.subscribe(
+        s.temperatureTopic.trim(),
+        MqttQos.atLeastOnce,
+      );
     }
+
     if (s.espStatusTopic.trim().isNotEmpty) {
-      _client!.subscribe(s.espStatusTopic.trim(), MqttQos.atLeastOnce);
-      final heartbeatTopic = _heartbeatTopicFor(s.espStatusTopic);
+      _client!.subscribe(
+        s.espStatusTopic.trim(),
+        MqttQos.atLeastOnce,
+      );
+
+      final heartbeatTopic =
+          _heartbeatTopicFor(s.espStatusTopic);
+
       if (heartbeatTopic != s.espStatusTopic.trim()) {
-        _client!.subscribe(heartbeatTopic, MqttQos.atLeastOnce);
+        _client!.subscribe(
+          heartbeatTopic,
+          MqttQos.atLeastOnce,
+        );
       }
     }
+
     for (final r in s.relays) {
       if (r.stateTopic.trim().isNotEmpty) {
-        _client!.subscribe(r.stateTopic.trim(), MqttQos.atLeastOnce);
+        _client!.subscribe(
+          r.stateTopic.trim(),
+          MqttQos.atLeastOnce,
+        );
       }
     }
   }
 
-  void _onMessage(List<MqttReceivedMessage<MqttMessage>> events) {
+  void _onMessage(
+    List<MqttReceivedMessage<MqttMessage>> events,
+  ) {
     for (final event in events) {
       final topic = event.topic;
+
       final recMess = event.payload as MqttPublishMessage;
+
       final payload =
-          MqttPublishPayload.bytesToStringAsString(recMess.payload.message)
-              .trim();
+          MqttPublishPayload.bytesToStringAsString(
+        recMess.payload.message,
+      ).trim();
 
       if (_settings == null) continue;
 
-      final heartbeatTopic = _heartbeatTopicFor(_settings!.espStatusTopic);
+      final heartbeatTopic =
+          _heartbeatTopicFor(_settings!.espStatusTopic);
+
       if (topic == heartbeatTopic) {
         if (recMess.header?.retain == true) {
           continue;
         }
+
         _espStatusController.add(true);
         continue;
       }
 
       if (topic == _settings!.espStatusTopic) {
         final normalized = payload.toLowerCase();
+
         if (normalized.contains('offline')) {
           _espStatusController.add(false);
         } else if (normalized.contains('online') ||
@@ -180,6 +287,7 @@ class MqttService {
             _espStatusController.add(false);
           }
         }
+
         continue;
       }
 
@@ -187,6 +295,7 @@ class MqttService {
         if (recMess.header?.retain == true) {
           continue;
         }
+
         _temperatureController.add(payload);
         _espStatusController.add(true);
         continue;
@@ -194,9 +303,11 @@ class MqttService {
 
       for (final r in _settings!.relays) {
         if (topic == r.stateTopic) {
-          final on = payload.toUpperCase() == r.onPayload.toUpperCase() ||
+          final on =
+              payload.toUpperCase() == r.onPayload.toUpperCase() ||
               payload == '1' ||
               payload.toLowerCase() == 'true';
+
           _relayStateController.add({r.id: on});
           break;
         }
@@ -204,15 +315,29 @@ class MqttService {
     }
   }
 
-  Future<void> publish(String topic, String message) async {
+  Future<void> publish(
+    String topic,
+    String message,
+  ) async {
     if (_client == null || !isConnected) return;
+
     final builder = MqttClientPayloadBuilder();
     builder.addString(message);
-    _client!.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
+
+    _client!.publishMessage(
+      topic,
+      MqttQos.atLeastOnce,
+      builder.payload!,
+    );
   }
 
-  Future<void> toggleRelay(RelayConfig relay, bool turnOn) async {
-    final payload = turnOn ? relay.onPayload : relay.offPayload;
+  Future<void> toggleRelay(
+    RelayConfig relay,
+    bool turnOn,
+  ) async {
+    final payload =
+        turnOn ? relay.onPayload : relay.offPayload;
+
     await publish(relay.commandTopic, payload);
   }
 
@@ -220,17 +345,22 @@ class MqttService {
     try {
       await _updatesSubscription?.cancel();
     } catch (_) {}
+
     _updatesSubscription = null;
+
     try {
       _client?.disconnect();
     } catch (_) {}
+
     _client = null;
+
     _connectionController.add(false);
     _espStatusController.add(false);
   }
 
   void dispose() {
     disconnect();
+
     _connectionController.close();
     _temperatureController.close();
     _relayStateController.close();

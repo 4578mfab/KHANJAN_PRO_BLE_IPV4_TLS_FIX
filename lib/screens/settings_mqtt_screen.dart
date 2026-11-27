@@ -40,11 +40,7 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
       'host': 'test.mosquitto.org',
       'ports': {'tcp': 1883, 'tls': 8883, 'ws': 8080, 'wss': 8081}
     },
-    'khanjan': {
-      'label': 'KHANJAN Private Broker',
-      'host': 'khanjanhome.duckdns.org',
-      'ports': {'tls': 8883}
-    },
+    'khanjan': {'label': 'KHANJAN Private Broker', 'host': 'khanjanhome.duckdns.org', 'ports': {'tcp': 1883, 'tls': 8883}},
     'custom': {
       'label': 'Custom (بروکر دلخواه)',
       'host': '',
@@ -85,7 +81,7 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
 
         if (value == 'khanjan') {
           // KHANJAN uses standard TCP/TLS only.
-          _settings.connectionMode = 'tls';
+          _settings.connectionMode = 'tcp';
           _settings.useWebSocket = false;
         }
 
@@ -98,10 +94,8 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
   void _selectConnectionMode(String? value) {
     if (value == null) return;
 
-    // Private KHANJAN broker is restricted to standard TLS.
-    if (_settings.brokerPreset == 'khanjan' && value != 'tls') {
-      return;
-    }
+    
+    
 
     setState(() {
       _settings.connectionMode = value;
@@ -211,12 +205,16 @@ class _SettingsMqttScreenState extends State<SettingsMqttScreen> {
                         labelText: 'نوع اتصال',
                       ),
                       items: _settings.brokerPreset == 'khanjan'
-                          ? const [
-                              DropdownMenuItem(
-                                value: 'tls',
-                                child: Text('TLS (TCP امن)'),
-                              ),
-                            ]
+    ? const [
+        DropdownMenuItem(
+          value: 'tcp',
+          child: Text('TCP'),
+        ),
+        DropdownMenuItem(
+          value: 'tls',
+          child: Text('TLS (TCP امن)'),
+        ),
+      ]
                           : const [
                               DropdownMenuItem(
                                 value: 'tcp',
